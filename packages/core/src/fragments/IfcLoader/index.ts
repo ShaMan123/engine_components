@@ -116,6 +116,7 @@ export class IfcLoader extends Component implements Disposable {
    * @param config - Optional extra data for loading the IFC.
    *
    * @returns A Promise that resolves to the FragmentsModel containing the loaded and processed IFC data.
+   * @throws {FRAGS.LoadAbortedError}
    *
    * @example
    * // Load all attributes and relations using the instanceCallback
@@ -142,8 +143,23 @@ export class IfcLoader extends Component implements Disposable {
       userData?: Record<string, any>;
       processData?: Omit<FRAGS.ProcessData, "bytes">;
       instanceCallback?: (importer: FRAGS.IfcImporter) => void;
+      /**
+       * Aborts the load when the signal fires: `load()` rejects with a
+       * {@link FRAGS.LoadAbortedError} and no model is added. The IFC conversion can't be
+       * interrupted (yet), so an abort during it takes effect once it finishes and
+       * skips loading the converted model.
+       */
+      signal?: AbortSignal;
     },
   ) {
+    const signal = config?.signal;
+    const throwIfAborted = () => {
+      if (signal?.aborted) {
+        throw new FRAGS.LoadAbortedError(name);
+      }
+    };
+    throwIfAborted();
+
     const fragments = this.components.get(FragmentsManager);
     if (!fragments.initialized) {
       throw new Error("You need to initialize fragments first.");
@@ -151,6 +167,7 @@ export class IfcLoader extends Component implements Disposable {
 
     if (this.settings.autoSetWasm) {
       await this.autoSetWasm();
+      throwIfAborted();
     }
 
     fragments.core.settings.autoCoordinate = coordinate;
@@ -168,10 +185,12 @@ export class IfcLoader extends Component implements Disposable {
       ...config?.processData,
       bytes: data,
     });
+    throwIfAborted();
 
-    const model = await fragments.core.load(bytes as any, {
+    const model = await fragments.core.load(bytes, {
       modelId: name,
       userData: config?.userData,
+      signal,
     });
 
     return model;
